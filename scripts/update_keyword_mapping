@@ -1,0 +1,103 @@
+import sys
+from string import Template
+from f_web_data.utils import sqlalchemy_engine_sf
+
+# variables to use if not passed in
+global_list_type = 'retailer'
+global_keyword = '054 - Joe Fresh/Real Canadian Superstore'
+global_new_entity = '/m/0gttt41'
+
+# consts
+LIST_TYPE_SET_ID_MAP = {
+    'retailer': [1, 2, 3],
+}
+
+LIST_TYPE_MAPPING_TABLE_MAP = {
+    'retailer': ('_LOOKUP_RETAILER_ENTITY_MAPPING', 'RETAILER_NAME'),
+}
+
+
+def current_entity_for_keyword(eng, list_type, keyword):
+
+    mapping_table_name = LIST_TYPE_MAPPING_TABLE_MAP[list_type][0]
+    key_column = LIST_TYPE_MAPPING_TABLE_MAP[list_type][1]
+    sql = Template('''
+        SELECT "ENCODED_TERM" 
+        FROM "$table_name"
+        WHERE "$key_column" = '$keyword';
+    ''')
+    with eng.begin() as txn:
+        return txn.execute(
+            sql.substitute(
+                table_name=mapping_table_name,
+                key_column=key_column,
+                keyword=keyword)).scalar()
+
+
+def update_mapping_table(eng, list_type, keyword, new_entity):
+
+    mapping_table_name = LIST_TYPE_MAPPING_TABLE_MAP[list_type][0]
+    key_column = LIST_TYPE_MAPPING_TABLE_MAP[list_type][1]
+    sql = Template('''
+        UPDATE "$table_name"
+        SET "ENCODED_TERM" = '$new_entity'
+        WHERE "$key_column" = '$keyword';
+    ''')
+    with eng.begin() as txn:
+        return txn.execute(
+            sql.substitute(
+                table_name=mapping_table_name,
+                new_entity=new_entity,
+                key_column=key_column,
+                keyword=keyword))
+
+
+def update_keyword_table(eng, list_type, curr_entity, new_entity):
+
+    set_ids = ','.join(map(str, LIST_TYPE_SET_ID_MAP[list_type]))
+    sql = Template('''
+        UPDATE "_LOOKUP_SET_KEYWORD"
+        SET "KEYWORD" = '$new_entity',
+            "ANCHOR" = NULL,
+            "ANCHOR_TRY_TIMES" = NULL,
+            "MAX_KEYWORD_VALUE" = NULL,
+            "MAX_ANCHOR_VALUE" = NULL,
+            "KEYWORD_ANCHOR_MAX_RATIO" = NULL,
+            "KEYWORD_DEFAULT_ANCHOR_MAX_RATIO" = NULL,
+            "AVG_KEYWORD_VALUE" = NULL,
+            "AVG_ANCHOR_VALUE" = NULL,
+            "KEYWORD_ANCHOR_AVG_RATIO" = NULL,
+            "KEYWORD_DEFAULT_ANCHOR_AVG_RATIO" = NULL,
+            "PREFERRED_ANCHOR_INDEX" = NULL,
+            "LOWER_BOUND_ANCHOR_INDEX" = -999999999,
+            "UPPER_BOUND_ANCHOR_INDEX" = 999999999
+        WHERE "SET_ID" IN ($set_ids)
+        AND "KEYWORD" = '$curr_entity';
+    ''')
+    with eng.begin() as txn:
+        return txn.execute(
+            sql.substitute(
+                new_entity=new_entity, set_ids=set_ids,
+                curr_entity=curr_entity))
+
+
+def main(args):
+    if len(args) != 3:
+        list_type = global_list_type
+        keyword = global_keyword
+        new_entity = global_new_entity
+    else:
+        list_type, keyword, new_entity = args
+    eng = sqlalchemy_engine_sf(
+        'L1WEBDATA', 'GOOGLE_TRENDS', role='DBADMIN_L1WEBDATA')
+    curr_entity = current_entity_for_keyword(eng, list_type, keyword)
+    print('curr_entity: ', curr_entity)
+    update_mapping_table(eng, list_type, keyword, new_entity)
+    update_keyword_table(eng, list_type, curr_entity, new_entity)
+
+
+if __name__ == '__main__':
+    # list_type {retailer, brand, category, strategy},
+    # keyword
+    # new entity
+    main(sys.argv[1:])
